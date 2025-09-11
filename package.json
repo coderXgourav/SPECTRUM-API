@@ -1,0 +1,37 @@
+{
+  "name": "spectrum-backend",
+  "version": "1.0.0",
+  "description": "Backend server for Spectrum358 application",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "validate-env": "node validate-env.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "firebase",
+    "express",
+    "spectrum358",
+    "backend"
+  ],
+  "author": "Tushankar",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "cors": "^2.8.5",
+    "dompurify": "^3.2.6",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "firebase": "^10.7.2",
+    "firebase-admin": "^12.0.0",
+    "helmet": "^7.1.0",
+    "jsdom": "^26.1.0",
+    "morgan": "^1.10.0",
+    "nodemailer": "^7.0.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}
