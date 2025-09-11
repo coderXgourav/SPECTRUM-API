@@ -4,6 +4,7 @@ import axios from 'axios';
 
 const taskRouter = Router();
 
+// Generate tasks and markdown (your existing endpoint - improved)
 taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
   try {
     const { userId, postId } = req.params;
@@ -18,57 +19,77 @@ taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
       .get();
 
     if (!postDoc.exists) {
-      return res.status(404).json({ error: 'Post not found' });
+      return res.status(404).json({ 
+        error: 'Post not found',
+        success: false 
+      });
     }
 
     const postData = postDoc.data();
+
+    // Check if tasks are already generated
+    if (postData.taskGenerated) {
+      return res.status(200).json({
+        success: true,
+        postId: postDoc.id,
+        idea: postData.title,
+        markdown: postData.markdown,
+        taskGenerated: true,
+        message: 'Tasks already generated',
+        alreadyExists: true
+      });
+    }
 
     // -----------------------------
     // 2. Generate Markdown Roadmap
     // -----------------------------
     const markdownPrompt = `
-You are a professional business strategist. 
-Using the following business idea, create a structured step-by-step roadmap in Markdown format. 
+You are a professional business strategist.  
+Using the following business idea, create a **structured Markdown roadmap**.
 
-Rules:
-- Begin with the IDEA TITLE
-- Add a SHORT DESCRIPTION (max 2–3 lines, concise but clear)
-- Then provide "Step 1", "Step 2", ..., each with clear explanations
-- Use Markdown formatting (#, ##, lists, etc.)
-- Make it clean, readable, and actionable
-- Do not include any extra commentary
+⚡ Rules:
+- Start with "# ${postData.title || 'BUSINESS IDEA'}"
+- Then add a short **2–3 line description**
+- Insert a horizontal rule (---)
+- Add "## 🔹 Short Description" with bullet points
+- Insert another horizontal rule (---)
+- Then add "## 🚀 Project Roadmap"
+- Break the roadmap into "### **Step 1: Title**" with detailed bullet points
+- Separate each step with "---"
+- Keep it **professional, clean, and actionable**
+- Use emojis (🔹, 🚀, ✅, 📊, 💡) for clarity but don't overuse them
+- Do NOT include any explanation outside of Markdown
+- Output only Markdown text (no JSON, no extra commentary)
 
-Idea Data: ${JSON.stringify(postData, null, 2)}
+Here is the idea data you must format:
+${JSON.stringify(postData, null, 2)}
 `;
 
-    const markdownResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: 'meta-llama/llama-3.3-8b-instruct:free',
-        messages: [{ role: 'user', content: markdownPrompt }],
-        temperature: 0.7,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
+    let markdownText = '';
+    try {
+      const markdownResponse = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'meta-llama/llama-3.3-8b-instruct:free',
+          messages: [{ role: 'user', content: markdownPrompt }],
+          temperature: 0.7,
         },
-      }
-    );
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000, // 30 seconds timeout
+        }
+      );
 
-    let markdownText = markdownResponse.data.choices[0].message.content;
-    markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
-
-    // Save markdown into Firestore under the post
-    await db
-      .collection('users')
-      .doc(userId)
-      .collection('posts')
-      .doc(postId)
-      .update({
-        markdown: markdownText,
-        markdown_created_at: Timestamp.now(),
-      });
+      markdownText = markdownResponse.data.choices[0].message.content;
+      markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
+    } catch (markdownError) {
+      console.error('❌ Error generating markdown:', markdownError.message);
+      // Continue without markdown if it fails
+      markdownText = `# ${postData.title || 'Business Idea'}\n\nRoadmap generation failed. Please try again.`;
+    }
 
     // -----------------------------
     // 3. Generate Tasks
@@ -98,78 +119,123 @@ Rules:
 Idea Data: ${JSON.stringify(postData, null, 2)}
 `;
 
-    const tasksResponse = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: 'meta-llama/llama-3.3-8b-instruct:free',
-        messages: [{ role: 'user', content: taskPrompt }],
-        temperature: 0.7,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    let tasksText = tasksResponse.data.choices[0].message.content;
-    tasksText = tasksText.replace(/^```json\n?|```$/g, '').trim();
-
-    let tasks;
+    let tasks = [];
     try {
-      tasks = JSON.parse(tasksText);
-    } catch (e) {
-      console.error("AI didn't return valid JSON:", tasksText);
-      return res.status(200).json({ raw: tasksText, markdown: markdownText });
+      const tasksResponse = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: 'meta-llama/llama-3.3-8b-instruct:free',
+          messages: [{ role: 'user', content: taskPrompt }],
+          temperature: 0.7,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 30000, // 30 seconds timeout
+        }
+      );
+
+      let tasksText = tasksResponse.data.choices[0].message.content;
+      tasksText = tasksText.replace(/^```json\n?|```$/g, '').trim();
+
+      try {
+        tasks = JSON.parse(tasksText);
+        if (!Array.isArray(tasks)) {
+          throw new Error('Tasks response is not an array');
+        }
+      } catch (parseError) {
+        console.error("AI didn't return valid JSON:", tasksText);
+        // Return with markdown but indicate task generation failed
+        return res.status(200).json({ 
+          success: false,
+          raw: tasksText, 
+          markdown: markdownText,
+          error: 'Task generation failed - invalid JSON format',
+          postId: postDoc.id,
+          idea: postData.title
+        });
+      }
+    } catch (taskError) {
+      console.error('❌ Error generating tasks:', taskError.message);
+      return res.status(200).json({
+        success: false,
+        markdown: markdownText,
+        error: 'Task generation failed',
+        postId: postDoc.id,
+        idea: postData.title
+      });
     }
 
     // 4. Fix dates → Firestore Timestamp based on take_time
     const today = new Date();
     let currentDate = new Date(today);
 
-    tasks = tasks.map((task) => {
-      const daysNeeded = Math.ceil(task.take_time / 8);
+    tasks = tasks.map((task, index) => {
+      const daysNeeded = Math.ceil((task.take_time || 8) / 8); // Default 8 hours if missing
       currentDate.setDate(currentDate.getDate() + daysNeeded);
       return {
         ...task,
+        id: `task_${index + 1}`,
         date: Timestamp.fromDate(new Date(currentDate)),
+        status: task.status || 'pending',
+        progress: task.progress || 0,
+        take_time: task.take_time || 8,
+        coin: (task.take_time || 8) * 10
       };
     });
 
-    // 5. Save tasks under Firestore
-    const tasksCollection = db
-      .collection('users')
-      .doc(userId)
-      .collection('posts')
-      .doc(postId)
-      .collection('tasks');
+    // 5. Save tasks and markdown to Firestore
+    try {
+      // Save markdown to post document
+      await db
+        .collection('users')
+        .doc(userId)
+        .collection('posts')
+        .doc(postId)
+        .update({
+          markdown: markdownText,
+          markdown_created_at: Timestamp.now(),
+          taskGenerated: true,
+          taskGenerated_at: Timestamp.now(),
+          total_tasks: tasks.length
+        });
 
-    const batch = db.batch();
-    tasks.forEach((task) => {
-      const taskRef = tasksCollection.doc();
-      batch.set(taskRef, {
-        ...task,
-        post_id: postId,
-        user_id: userId,
-        created_at: Timestamp.now(),
+      // Save tasks to subcollection
+      if (tasks.length > 0) {
+        const tasksCollection = db
+          .collection('users')
+          .doc(userId)
+          .collection('posts')
+          .doc(postId)
+          .collection('tasks');
+
+        const batch = db.batch();
+        tasks.forEach((task) => {
+          const taskRef = tasksCollection.doc();
+          batch.set(taskRef, {
+            ...task,
+            post_id: postId,
+            user_id: userId,
+            created_at: Timestamp.now(),
+          });
+        });
+        await batch.commit();
+      }
+    } catch (firestoreError) {
+      console.error('❌ Error saving to Firestore:', firestoreError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to save data to database',
+        markdown: markdownText,
+        tasks: tasks
       });
-    });
-    await batch.commit();
+    }
 
-    // ✅ 6. Mark post as "taskGenerated = true"
-    await db
-      .collection('users')
-      .doc(userId)
-      .collection('posts')
-      .doc(postId)
-      .update({
-        taskGenerated: true,
-        taskGenerated_at: Timestamp.now(),
-      });
-
-    // 7. Send response
+    // 7. Send successful response
     return res.status(200).json({
+      success: true,
       postId: postDoc.id,
       idea: postData.title,
       savedTasks: tasks.length,
@@ -182,9 +248,219 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
         }),
       })),
     });
+
   } catch (error) {
     console.error('❌ Error generating tasks & markdown:', error.response?.data || error.message);
-    return res.status(500).json({ error: 'Failed to generate tasks & markdown' });
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate tasks & markdown',
+      details: error.message
+    });
+  }
+});
+
+// NEW: Get existing markdown and tasks (for preview)
+taskRouter.get('/roadmap/:userId/:postId', async (req, res) => {
+  try {
+    const { userId, postId } = req.params;
+    const db = getFirestore();
+
+    // Fetch post document
+    const postDoc = await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .get();
+
+    if (!postDoc.exists) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Post not found' 
+      });
+    }
+
+    const postData = postDoc.data();
+
+    // If no markdown exists, suggest generation
+    if (!postData.markdown || !postData.taskGenerated) {
+      return res.status(200).json({
+        success: false,
+        postId: postDoc.id,
+        idea: postData.title,
+        taskGenerated: false,
+        message: 'Roadmap not generated yet',
+        suggestGenerate: true
+      });
+    }
+
+    // Fetch tasks from subcollection
+    const tasksSnapshot = await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .collection('tasks')
+      .orderBy('created_at')
+      .get();
+
+    const tasks = tasksSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      date: doc.data().date?.toDate().toLocaleString('en-US', {
+        timeZone: 'Asia/Kolkata',
+      }) || 'No date set'
+    }));
+
+    return res.status(200).json({
+      success: true,
+      postId: postDoc.id,
+      idea: postData.title,
+      markdown: postData.markdown,
+      taskGenerated: postData.taskGenerated,
+      markdown_created_at: postData.markdown_created_at,
+      total_tasks: tasks.length,
+      tasks: tasks
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching roadmap:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch roadmap',
+      details: error.message
+    });
+  }
+});
+
+// NEW: Get only markdown content (lightweight)
+taskRouter.get('/markdown/:userId/:postId', async (req, res) => {
+  try {
+    const { userId, postId } = req.params;
+    const db = getFirestore();
+
+    const postDoc = await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .get();
+
+    if (!postDoc.exists) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Post not found' 
+      });
+    }
+
+    const postData = postDoc.data();
+
+    return res.status(200).json({
+      success: true,
+      postId: postDoc.id,
+      idea: postData.title,
+      markdown: postData.markdown || '',
+      taskGenerated: postData.taskGenerated || false,
+      markdown_created_at: postData.markdown_created_at
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching markdown:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch markdown' 
+    });
+  }
+});
+
+// NEW: Regenerate only markdown (without tasks)
+taskRouter.post('/regenerate-markdown/:userId/:postId', async (req, res) => {
+  try {
+    const { userId, postId } = req.params;
+    const db = getFirestore();
+
+    const postDoc = await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .get();
+
+    if (!postDoc.exists) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Post not found' 
+      });
+    }
+
+    const postData = postDoc.data();
+
+    const markdownPrompt = `
+You are a professional business strategist.  
+Using the following business idea, create a **structured Markdown roadmap**.
+
+⚡ Rules:
+- Start with "# ${postData.title || 'BUSINESS IDEA'}"
+- Then add a short **2–3 line description**
+- Insert a horizontal rule (---)
+- Add "## 🔹 Short Description" with bullet points
+- Insert another horizontal rule (---)
+- Then add "## 🚀 Project Roadmap"
+- Break the roadmap into "### **Step 1: Title**" with detailed bullet points
+- Separate each step with "---"
+- Keep it **professional, clean, and actionable**
+- Use emojis (🔹, 🚀, ✅, 📊, 💡) for clarity but don't overuse them
+- Do NOT include any explanation outside of Markdown
+- Output only Markdown text (no JSON, no extra commentary)
+
+Here is the idea data you must format:
+${JSON.stringify(postData, null, 2)}
+`;
+
+    const markdownResponse = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: 'meta-llama/llama-3.3-8b-instruct:free',
+        messages: [{ role: 'user', content: markdownPrompt }],
+        temperature: 0.8, // Slightly higher for variety
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      }
+    );
+
+    let markdownText = markdownResponse.data.choices[0].message.content;
+    markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
+
+    // Update markdown in Firestore
+    await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .update({
+        markdown: markdownText,
+        markdown_updated_at: Timestamp.now(),
+      });
+
+    return res.status(200).json({
+      success: true,
+      postId: postDoc.id,
+      idea: postData.title,
+      markdown: markdownText,
+      message: 'Markdown regenerated successfully'
+    });
+
+  } catch (error) {
+    console.error('❌ Error regenerating markdown:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to regenerate markdown' 
+    });
   }
 });
 
