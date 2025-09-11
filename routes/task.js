@@ -22,10 +22,58 @@ taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
     }
 
     const postData = postDoc.data();
-    // console.log("🔥 Full Post Data:", JSON.stringify(postData, null, 2));
 
-    // 2. Build Prompt with ALL post data
-    const prompt = `
+    // -----------------------------
+    // 2. Generate Markdown Roadmap
+    // -----------------------------
+    const markdownPrompt = `
+You are a professional business strategist. 
+Using the following business idea, create a structured step-by-step roadmap in Markdown format. 
+
+Rules:
+- Begin with the IDEA TITLE
+- Add a SHORT DESCRIPTION (max 2–3 lines, concise but clear)
+- Then provide "Step 1", "Step 2", ..., each with clear explanations
+- Use Markdown formatting (#, ##, lists, etc.)
+- Make it clean, readable, and actionable
+- Do not include any extra commentary
+
+Idea Data: ${JSON.stringify(postData, null, 2)}
+`;
+
+    const markdownResponse = await axios.post(
+      'https://openrouter.ai/api/v1/chat/completions',
+      {
+        model: 'meta-llama/llama-3.3-8b-instruct:free',
+        messages: [{ role: 'user', content: markdownPrompt }],
+        temperature: 0.7,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    let markdownText = markdownResponse.data.choices[0].message.content;
+    markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
+
+    // Save markdown into Firestore under the post
+    await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .update({
+        markdown: markdownText,
+        markdown_created_at: Timestamp.now(),
+      });
+
+    // -----------------------------
+    // 3. Generate Tasks
+    // -----------------------------
+    const taskPrompt = `
 You are a professional project planner. Research this business idea in detail and break it down into a complete roadmap of tasks from start (0%) to completion (100%). 
 Do not stop at 5–7 tasks. Cover EVERYTHING realistically required.
 
@@ -48,14 +96,13 @@ Rules:
 - Do not wrap the JSON in code fences or any other text.
 
 Idea Data: ${JSON.stringify(postData, null, 2)}
-    `;
+`;
 
-    // 3. Call OpenRouter API
-    const response = await axios.post(
+    const tasksResponse = await axios.post(
       'https://openrouter.ai/api/v1/chat/completions',
       {
         model: 'meta-llama/llama-3.3-8b-instruct:free',
-        messages: [{ role: 'user', content: prompt }],
+        messages: [{ role: 'user', content: taskPrompt }],
         temperature: 0.7,
       },
       {
@@ -66,29 +113,27 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
       }
     );
 
-    let tasksText = response.data.choices[0].message.content;
-
-    // Remove any code fences or extra text
-    tasksText = tasksText.replace(/^```json\n|```$/g, '').trim();
+    let tasksText = tasksResponse.data.choices[0].message.content;
+    tasksText = tasksText.replace(/^```json\n?|```$/g, '').trim();
 
     let tasks;
     try {
       tasks = JSON.parse(tasksText);
     } catch (e) {
       console.error("AI didn't return valid JSON:", tasksText);
-      return res.status(200).json({ raw: tasksText });
+      return res.status(200).json({ raw: tasksText, markdown: markdownText });
     }
 
     // 4. Fix dates → Firestore Timestamp based on take_time
-    const today = new Date('2025-09-11T15:14:00+05:30'); // Current date and time in IST
+    const today = new Date();
     let currentDate = new Date(today);
 
     tasks = tasks.map((task) => {
-      const daysNeeded = Math.ceil(task.take_time / 8); // 8 hours = 1 workday
+      const daysNeeded = Math.ceil(task.take_time / 8);
       currentDate.setDate(currentDate.getDate() + daysNeeded);
       return {
         ...task,
-        date: Timestamp.fromDate(new Date(currentDate)), // Firestore Timestamp
+        date: Timestamp.fromDate(new Date(currentDate)),
       };
     });
 
@@ -101,9 +146,8 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
       .collection('tasks');
 
     const batch = db.batch();
-
     tasks.forEach((task) => {
-      const taskRef = tasksCollection.doc(); // auto-generated ID
+      const taskRef = tasksCollection.doc();
       batch.set(taskRef, {
         ...task,
         post_id: postId,
@@ -111,22 +155,36 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
         created_at: Timestamp.now(),
       });
     });
-
     await batch.commit();
 
-    // 6. Send response
+    // ✅ 6. Mark post as "taskGenerated = true"
+    await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .doc(postId)
+      .update({
+        taskGenerated: true,
+        taskGenerated_at: Timestamp.now(),
+      });
+
+    // 7. Send response
     return res.status(200).json({
       postId: postDoc.id,
       idea: postData.title,
       savedTasks: tasks.length,
-      tasks: tasks.map(task => ({
+      markdown: markdownText,
+      taskGenerated: true,
+      tasks: tasks.map((task) => ({
         ...task,
-        date: task.date.toDate().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }) // Convert Timestamp to readable string for response
+        date: task.date.toDate().toLocaleString('en-US', {
+          timeZone: 'Asia/Kolkata',
+        }),
       })),
     });
   } catch (error) {
-    console.error('❌ Error generating tasks:', error.response?.data || error.message);
-    return res.status(500).json({ error: 'Failed to generate tasks' });
+    console.error('❌ Error generating tasks & markdown:', error.response?.data || error.message);
+    return res.status(500).json({ error: 'Failed to generate tasks & markdown' });
   }
 });
 
