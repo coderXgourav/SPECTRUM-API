@@ -105,6 +105,7 @@ Each task must follow this format:
   "status": "pending",
   "date": "TIMESTAMP",   // placeholder, will be replaced in backend
   "title": "short task name",
+  "sub_title": "short sub description",
   "progress": 0,
   "take_time": number_of_hours,
   "coin": take_time * 10
