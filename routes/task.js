@@ -43,21 +43,23 @@ taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
     // -----------------------------
     // 2. Generate Markdown Roadmap
     // -----------------------------
-    const markdownPrompt = `
+const markdownPrompt = `
 You are a professional business strategist.  
 Using the following business idea, create a **structured Markdown roadmap**.
 
 ⚡ Rules:
-- Start with "## ${postData.title || 'BUSINESS IDEA'}"
-- Then add a short **2–3 line description**
+- Start with "# ${postData.title || 'Business Idea'}"
+- Then add a 2–3 line descriptive paragraph
 - Insert a horizontal rule (---)
-- Add "### 🔹 Short Description" with bullet points as "####"
+- Add "## 🔹 Short Description" and provide bullet points with "*" (not ####)
 - Insert another horizontal rule (---)
-- Then add "### 🚀 Project Roadmap"
-- Break the roadmap into "### Step 1: Title" and under it list points as "####"
+- Then add "## 🚀 Project Roadmap"
+- For each step:
+  - Use "### *Step X: Title*" (with italics around the title)
+  - Under it, write bullet points starting with "*"
+  - Use emojis like ✅ 📊 💡 🚀 naturally where they fit
 - Separate each step with "---"
 - Keep it **professional, clean, and actionable**
-- Use emojis (🔹, 🚀, ✅, 📊, 💡) for clarity but don't overuse them
 - Do NOT include any explanation outside of Markdown
 - Output only Markdown text (no JSON, no extra commentary)
 
