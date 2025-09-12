@@ -48,13 +48,13 @@ You are a professional business strategist.
 Using the following business idea, create a **structured Markdown roadmap**.
 
 ⚡ Rules:
-- Start with "# ${postData.title || 'BUSINESS IDEA'}"
+- Start with "## ${postData.title || 'BUSINESS IDEA'}"
 - Then add a short **2–3 line description**
 - Insert a horizontal rule (---)
-- Add "## 🔹 Short Description" with bullet points
+- Add "### 🔹 Short Description" with bullet points as "####"
 - Insert another horizontal rule (---)
-- Then add "## 🚀 Project Roadmap"
-- Break the roadmap into "### **Step 1: Title**" with detailed bullet points
+- Then add "### 🚀 Project Roadmap"
+- Break the roadmap into "### Step 1: Title" and under it list points as "####"
 - Separate each step with "---"
 - Keep it **professional, clean, and actionable**
 - Use emojis (🔹, 🚀, ✅, 📊, 💡) for clarity but don't overuse them
@@ -70,7 +70,7 @@ ${JSON.stringify(postData, null, 2)}
       const markdownResponse = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'meta-llama/llama-3.3-8b-instruct:free',
+          model: 'openrouter/sonoma-dusk-alpha',
           messages: [{ role: 'user', content: markdownPrompt }],
           temperature: 0.7,
         },
@@ -85,10 +85,12 @@ ${JSON.stringify(postData, null, 2)}
 
       markdownText = markdownResponse.data.choices[0].message.content;
       markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
+
+      // Ensure \n are properly formatted
+      markdownText = markdownText.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n\n');
     } catch (markdownError) {
       console.error('❌ Error generating markdown:', markdownError.message);
-      // Continue without markdown if it fails
-      markdownText = `# ${postData.title || 'Business Idea'}\n\nRoadmap generation failed. Please try again.`;
+      markdownText = `## ${postData.title || 'Business Idea'}\n\nRoadmap generation failed. Please try again.`;
     }
 
     // -----------------------------
@@ -124,7 +126,7 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
       const tasksResponse = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'meta-llama/llama-3.3-8b-instruct:free',
+          model: 'openrouter/sonoma-dusk-alpha',
           messages: [{ role: 'user', content: taskPrompt }],
           temperature: 0.7,
         },
@@ -147,7 +149,6 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
         }
       } catch (parseError) {
         console.error("AI didn't return valid JSON:", tasksText);
-        // Return with markdown but indicate task generation failed
         return res.status(200).json({ 
           success: false,
           raw: tasksText, 
@@ -173,7 +174,7 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
     let currentDate = new Date(today);
 
     tasks = tasks.map((task, index) => {
-      const daysNeeded = Math.ceil((task.take_time || 8) / 8); // Default 8 hours if missing
+      const daysNeeded = Math.ceil((task.take_time || 8) / 8); 
       currentDate.setDate(currentDate.getDate() + daysNeeded);
       return {
         ...task,
@@ -188,7 +189,6 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
 
     // 5. Save tasks and markdown to Firestore
     try {
-      // Save markdown to post document
       await db
         .collection('users')
         .doc(userId)
@@ -202,7 +202,6 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
           total_tasks: tasks.length
         });
 
-      // Save tasks to subcollection
       if (tasks.length > 0) {
         const tasksCollection = db
           .collection('users')
@@ -265,7 +264,6 @@ taskRouter.get('/roadmap/:userId/:postId', async (req, res) => {
     const { userId, postId } = req.params;
     const db = getFirestore();
 
-    // Fetch post document
     const postDoc = await db
       .collection('users')
       .doc(userId)
@@ -282,7 +280,6 @@ taskRouter.get('/roadmap/:userId/:postId', async (req, res) => {
 
     const postData = postDoc.data();
 
-    // If no markdown exists, suggest generation
     if (!postData.markdown || !postData.taskGenerated) {
       return res.status(200).json({
         success: false,
@@ -294,7 +291,6 @@ taskRouter.get('/roadmap/:userId/:postId', async (req, res) => {
       });
     }
 
-    // Fetch tasks from subcollection
     const tasksSnapshot = await db
       .collection('users')
       .doc(userId)
@@ -400,13 +396,13 @@ You are a professional business strategist.
 Using the following business idea, create a **structured Markdown roadmap**.
 
 ⚡ Rules:
-- Start with "# ${postData.title || 'BUSINESS IDEA'}"
+- Start with "## ${postData.title || 'BUSINESS IDEA'}"
 - Then add a short **2–3 line description**
 - Insert a horizontal rule (---)
-- Add "## 🔹 Short Description" with bullet points
+- Add "### 🔹 Short Description" with bullet points as "####"
 - Insert another horizontal rule (---)
-- Then add "## 🚀 Project Roadmap"
-- Break the roadmap into "### **Step 1: Title**" with detailed bullet points
+- Then add "### 🚀 Project Roadmap"
+- Break the roadmap into "### Step 1: Title" and under it list points as "####"
 - Separate each step with "---"
 - Keep it **professional, clean, and actionable**
 - Use emojis (🔹, 🚀, ✅, 📊, 💡) for clarity but don't overuse them
@@ -435,8 +431,8 @@ ${JSON.stringify(postData, null, 2)}
 
     let markdownText = markdownResponse.data.choices[0].message.content;
     markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
+    markdownText = markdownText.replace(/\r\n/g, '\n').replace(/\n{2,}/g, '\n\n');
 
-    // Update markdown in Firestore
     await db
       .collection('users')
       .doc(userId)
