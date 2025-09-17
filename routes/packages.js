@@ -92,42 +92,7 @@ const generatePackageId = () => {
   return prefix + randomNum;
 };
 
-// Helper function to calculate package status
-const calculatePackageStatus = (startDate, endDate) => {
-  const now = new Date();
-  const start = new Date(startDate);
-  const end = new Date(endDate);
 
-  if (now < start) {
-    return "Upcoming";
-  } else if (now > end) {
-    return "Expired";
-  } else {
-    // Check if expiring within 30 days
-    const thirtyDaysFromNow = new Date();
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-
-    if (end <= thirtyDaysFromNow) {
-      return "Expiring Soon";
-    }
-    return "Active";
-  }
-};
-
-// Helper function to format validity period
-const formatValidityPeriod = (startDate, endDate) => {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-
-  const formatDate = (date) => {
-    const day = date.getDate().toString().padStart(2, "0");
-    const month = date.toLocaleDateString("en-GB", { month: "short" });
-    const year = date.getFullYear();
-    return `${day} ${month} ${year}`;
-  };
-
-  return `${formatDate(start)} - ${formatDate(end)}`;
-};
 
 // Helper function to get subscriber count for a package
 const getSubscriberCount = async (db, packageId) => {
@@ -156,25 +121,24 @@ const formatPackageForFrontend = async (db, packageDoc) => {
     price: `$${data.price.toFixed(2)}`, // Ensure 2 decimal places
     duration: data.duration,
     features: data.features || [],
-    category: data.category,
     isActive: data.isActive,
-    status: calculatePackageStatus(data.startDate, data.endDate),
-    validity: formatValidityPeriod(data.startDate, data.endDate), // Match frontend expectation
-    validityPeriod: formatValidityPeriod(data.startDate, data.endDate),
     totalUser: subscriberCount.toLocaleString(), // Properly formatted with commas
+    packageLimit: data.packageLimit || null,
+    trialDays: data.trialDays || 0,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
-    startDate: data.startDate,
-    endDate: data.endDate,
   };
 };
 
 // Get all packages with formatted data for frontend
 router.get("/", async (req, res) => {
   try {
+    console.log('GET /packages - Starting request');
     const db = getAdminDB();
     const packagesRef = db.collection("packages");
     const querySnapshot = await packagesRef.orderBy("createdAt", "desc").get();
+    
+    console.log('Found', querySnapshot.size, 'packages in database');
 
     const packages = [];
     for (const doc of querySnapshot.docs) {
@@ -184,13 +148,7 @@ router.get("/", async (req, res) => {
 
     // Calculate stats
     const activePackages = packages.filter(
-      (pkg) => pkg.status === "Active"
-    ).length;
-    const expiredPackages = packages.filter(
-      (pkg) => pkg.status === "Expired"
-    ).length;
-    const expiringSoon = packages.filter(
-      (pkg) => pkg.status === "Expiring Soon"
+      (pkg) => pkg.isActive
     ).length;
     const totalRevenue = packages.reduce((sum, pkg) => {
       const price = parseFloat(pkg.price.replace("$", ""));
@@ -198,16 +156,18 @@ router.get("/", async (req, res) => {
       return sum + price * users;
     }, 0);
 
-    res.status(200).json({
+    const response = {
       packages: packages,
       total: packages.length,
       stats: {
         activePackages,
-        expiredPackages,
-        expiringSoon,
+        totalPackages: packages.length,
         totalRevenue: `$${totalRevenue.toLocaleString()}`,
       },
-    });
+    };
+    
+    console.log('Sending response:', JSON.stringify(response, null, 2));
+    res.status(200).json(response);
   } catch (error) {
     console.error("Get packages error:", error);
     res.status(500).json({
@@ -263,12 +223,15 @@ router.post("/", async (req, res) => {
       price,
       duration,
       features,
-      category,
       isActive = true,
-      startDate,
-      endDate,
+      packageLimit,
+      trialDays = 0,
     } = req.body;
 
+    console.log('Create package request body:', req.body);
+    console.log('packageLimit:', packageLimit, 'type:', typeof packageLimit);
+    console.log('trialDays:', trialDays, 'type:', typeof trialDays);
+    
     if (!name || !description || !price) {
       return res.status(400).json({
         error: "Name, description, and price are required",
@@ -278,36 +241,7 @@ router.post("/", async (req, res) => {
     const db = getAdminDB();
     const packageId = generatePackageId();
 
-    // Calculate default dates if not provided
-    const now = new Date();
-    const defaultStartDate = startDate || now.toISOString();
-    let defaultEndDate = endDate;
 
-    if (!defaultEndDate) {
-      const endDateObj = new Date(defaultStartDate);
-
-      // Calculate end date based on duration
-      switch (duration) {
-        case "1 month":
-          endDateObj.setMonth(endDateObj.getMonth() + 1);
-          break;
-        case "3 months":
-          endDateObj.setMonth(endDateObj.getMonth() + 3);
-          break;
-        case "6 months":
-          endDateObj.setMonth(endDateObj.getMonth() + 6);
-          break;
-        case "2 years":
-          endDateObj.setFullYear(endDateObj.getFullYear() + 2);
-          break;
-        case "1 year":
-        default:
-          endDateObj.setFullYear(endDateObj.getFullYear() + 1);
-          break;
-      }
-
-      defaultEndDate = endDateObj.toISOString();
-    }
 
     const packageData = {
       packageId,
@@ -316,10 +250,9 @@ router.post("/", async (req, res) => {
       price: parseFloat(price),
       duration: duration || "1 year",
       features: features || [],
-      category: category || "standard",
       isActive,
-      startDate: defaultStartDate,
-      endDate: defaultEndDate,
+      packageLimit: packageLimit && packageLimit !== '' ? parseInt(packageLimit) : null,
+      trialDays: trialDays && trialDays !== '' ? parseInt(trialDays) : 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -383,6 +316,16 @@ router.put("/:id", async (req, res) => {
     // Trim name if provided
     if (updates.name) {
       updates.name = updates.name.trim();
+    }
+
+    // Convert packageLimit to number if provided
+    if (updates.packageLimit !== undefined) {
+      updates.packageLimit = updates.packageLimit && updates.packageLimit !== '' ? parseInt(updates.packageLimit) : null;
+    }
+
+    // Convert trialDays to number if provided
+    if (updates.trialDays !== undefined) {
+      updates.trialDays = updates.trialDays && updates.trialDays !== '' ? parseInt(updates.trialDays) : 0;
     }
 
     const updateData = {
@@ -461,13 +404,7 @@ router.get("/active/list", async (req, res) => {
     const packages = [];
     for (const doc of querySnapshot.docs) {
       const formattedPackage = await formatPackageForFrontend(db, doc);
-      // Only include packages that are currently active (not expired)
-      if (
-        formattedPackage.status === "Active" ||
-        formattedPackage.status === "Expiring Soon"
-      ) {
-        packages.push(formattedPackage);
-      }
+      packages.push(formattedPackage);
     }
 
     res.status(200).json({
@@ -495,11 +432,8 @@ router.get("/stats/overview", async (req, res) => {
     }
 
     const stats = {
-      activePackages: packages.filter((pkg) => pkg.status === "Active").length,
-      expiredPackages: packages.filter((pkg) => pkg.status === "Expired")
-        .length,
-      expiringSoon: packages.filter((pkg) => pkg.status === "Expiring Soon")
-        .length,
+      activePackages: packages.filter((pkg) => pkg.isActive).length,
+      totalPackages: packages.length,
       totalRevenue: packages.reduce((sum, pkg) => {
         const price = parseFloat(pkg.price.replace("$", ""));
         const users = parseInt(pkg.totalUser.replace(/,/g, ""));

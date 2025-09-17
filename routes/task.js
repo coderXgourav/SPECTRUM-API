@@ -66,7 +66,6 @@ Using the following business idea, create a **structured Markdown roadmap**.
 Here is the idea data you must format:
 ${JSON.stringify(postData, null, 2)}
 `;
-
     let markdownText = '';
     try {
       const markdownResponse = await axios.post(
@@ -84,7 +83,7 @@ ${JSON.stringify(postData, null, 2)}
           timeout: 30000, // 30 seconds timeout
         }
       );
-
+      
       markdownText = markdownResponse.data.choices[0].message.content;
       markdownText = markdownText.replace(/^```(markdown)?\n?|```$/g, '').trim();
 
