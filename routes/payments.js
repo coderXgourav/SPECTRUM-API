@@ -84,6 +84,39 @@ router.post("/confirm-payment", async (req, res) => {
       const db = getAdminDB();
       const { packageId, userId } = paymentIntent.metadata;
 
+      // Get package details to calculate expiry and limits
+      const packageSnapshot = await db.collection("packages")
+        .where("packageId", "==", packageId)
+        .get();
+      
+      if (packageSnapshot.empty) {
+        return res.status(400).json({
+          error: "Package not found",
+        });
+      }
+
+      const packageData = packageSnapshot.docs[0].data();
+      
+      // Calculate expiry date based on package duration
+      const currentDate = new Date();
+      let expiryDate = new Date(currentDate);
+      
+      // Parse duration and add to current date
+      const duration = packageData.duration || "1 year";
+      if (duration.includes("year")) {
+        const years = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setFullYear(expiryDate.getFullYear() + years);
+      } else if (duration.includes("month")) {
+        const months = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setMonth(expiryDate.getMonth() + months);
+      } else if (duration.includes("day")) {
+        const days = parseInt(duration.match(/\d+/)?.[0] || "30");
+        expiryDate.setDate(expiryDate.getDate() + days);
+      } else {
+        // Default to 1 year if duration format is unclear
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      }
+
       // Save payment record
       await db.collection("payments").add({
         paymentIntentId,
@@ -102,13 +135,30 @@ router.post("/confirm-payment", async (req, res) => {
         paymentIntentId,
         status: "active",
         createdAt: new Date().toISOString(),
+        expiryDate: expiryDate.toISOString(),
       });
 
-      // Update user status to premium/paid
-      await db.collection("users").doc(userId).update({
+      // Find user document by uid
+      const usersRef = db.collection("users");
+      const userQuery = usersRef.where("uid", "==", userId);
+      const userSnapshot = await userQuery.get();
+      
+      if (userSnapshot.empty) {
+        return res.status(400).json({
+          error: "User not found",
+        });
+      }
+
+      const userDoc = userSnapshot.docs[0];
+      
+      // Update user with subscription details, expiry date, and remaining posts/prompts
+      await userDoc.ref.update({
         subscriptionStatus: "active",
         packageId: packageId,
         subscriptionDate: new Date().toISOString(),
+        expiryDate: expiryDate.toISOString(),
+        remainingPosts: packageData.packageLimit || null,
+        remainingPrompts: packageData.packageLimit || null,
         updatedAt: new Date().toISOString(),
       });
 
