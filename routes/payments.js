@@ -83,7 +83,7 @@ router.post("/confirm-payment", async (req, res) => {
     console.log('Payment Intent Metadata:', paymentIntent.metadata);
     console.log('Payment Intent Status:', paymentIntent.status);
 
-    if (paymentIntent.status === "succeeded") {
+    if (paymentIntent.status === "succeeded" || paymentIntent.status === "requires_capture") {
       const db = getAdminDB();
       const { packageId, userId } = paymentIntent.metadata;
       
@@ -178,9 +178,21 @@ router.post("/confirm-payment", async (req, res) => {
         paymentStatus: paymentIntent.status,
       });
     } else {
+      // Handle different payment statuses
+      let message = "Payment not completed";
+      if (paymentIntent.status === "requires_payment_method") {
+        message = "Payment requires a payment method";
+      } else if (paymentIntent.status === "requires_confirmation") {
+        message = "Payment requires confirmation";
+      } else if (paymentIntent.status === "processing") {
+        message = "Payment is being processed";
+      } else if (paymentIntent.status === "canceled") {
+        message = "Payment was canceled";
+      }
+      
       res.status(400).json({
         success: false,
-        message: "Payment not completed",
+        message: message,
         paymentStatus: paymentIntent.status,
       });
     }
@@ -188,6 +200,29 @@ router.post("/confirm-payment", async (req, res) => {
     console.error("Confirm payment error:", error);
     res.status(500).json({
       error: error.message || "Failed to confirm payment",
+    });
+  }
+});
+
+// Test endpoint to simulate payment completion (for testing only)
+router.post("/test-complete-payment", async (req, res) => {
+  try {
+    const { paymentIntentId } = req.body;
+    
+    // Confirm the payment intent with test card
+    const paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
+      payment_method: 'pm_card_visa', // Test payment method
+    });
+    
+    res.status(200).json({
+      success: true,
+      status: paymentIntent.status,
+      paymentIntentId: paymentIntent.id,
+    });
+  } catch (error) {
+    console.error("Test payment error:", error);
+    res.status(500).json({
+      error: error.message || "Failed to complete test payment",
     });
   }
 });
