@@ -104,6 +104,14 @@ router.post("/confirm-payment", async (req, res) => {
         createdAt: new Date().toISOString(),
       });
 
+      // Update user status to premium/paid
+      await db.collection("users").doc(userId).update({
+        subscriptionStatus: "active",
+        packageId: packageId,
+        subscriptionDate: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
       res.status(200).json({
         success: true,
         message: "Payment confirmed and subscription created",
