@@ -3,7 +3,16 @@ import Stripe from "stripe";
 import { getAdminDB } from "../config/firebase-admin.js";
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Initialize Stripe with error handling
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.error('STRIPE_SECRET_KEY is not set in environment variables');
+  throw new Error('STRIPE_SECRET_KEY is required');
+}
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2023-10-16',
+});
 
 // Create payment intent
 router.post("/create-payment-intent", async (req, res) => {
