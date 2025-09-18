@@ -79,10 +79,20 @@ router.post("/confirm-payment", async (req, res) => {
     }
 
     const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    console.log('Payment Intent Metadata:', paymentIntent.metadata);
+    console.log('Payment Intent Status:', paymentIntent.status);
 
     if (paymentIntent.status === "succeeded") {
       const db = getAdminDB();
       const { packageId, userId } = paymentIntent.metadata;
+      
+      if (!packageId || !userId) {
+        return res.status(400).json({
+          error: "Missing packageId or userId in payment metadata",
+          metadata: paymentIntent.metadata,
+        });
+      }
 
       // Get package details to calculate expiry and limits
       const packageSnapshot = await db.collection("packages")
