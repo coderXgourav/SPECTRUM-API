@@ -28,6 +28,10 @@ router.post("/create-payment-intent", async (req, res) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
       currency,
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: 'never',
+      },
       metadata: {
         packageId,
         userId,
@@ -95,13 +99,30 @@ router.post("/confirm-payment", async (req, res) => {
       }
 
       // Get package details to calculate expiry and limits
+      console.log('Looking for packageId:', packageId);
       const packageSnapshot = await db.collection("packages")
         .where("packageId", "==", packageId)
         .get();
       
+      console.log('Package query result:', packageSnapshot.size, 'documents found');
+      
       if (packageSnapshot.empty) {
+        // Try to find by document ID as fallback
+        try {
+          const packageDoc = await db.collection("packages").doc(packageId).get();
+          if (packageDoc.exists) {
+            const packageData = packageDoc.data();
+            console.log('Found package by doc ID:', packageData);
+          } else {
+            console.log('Package not found by doc ID either');
+          }
+        } catch (docError) {
+          console.log('Error finding by doc ID:', docError.message);
+        }
+        
         return res.status(400).json({
           error: "Package not found",
+          packageId: packageId,
         });
       }
 
@@ -148,18 +169,45 @@ router.post("/confirm-payment", async (req, res) => {
         expiryDate: expiryDate.toISOString(),
       });
 
-      // Find user document by uid
+      // Find user document by uid or user_id
       const usersRef = db.collection("users");
-      const userQuery = usersRef.where("uid", "==", userId);
-      const userSnapshot = await userQuery.get();
+      console.log('Looking for userId:', userId);
+      
+      let userQuery = usersRef.where("uid", "==", userId);
+      let userSnapshot = await userQuery.get();
+      
+      // If not found by uid, try user_id field
+      if (userSnapshot.empty) {
+        console.log('User not found by uid, trying user_id field');
+        userQuery = usersRef.where("user_id", "==", userId);
+        userSnapshot = await userQuery.get();
+      }
+      
+      // If still not found, try document ID
+      if (userSnapshot.empty) {
+        console.log('User not found by user_id, trying document ID');
+        try {
+          const userDoc = await usersRef.doc(userId).get();
+          if (userDoc.exists) {
+            userSnapshot = { docs: [userDoc], empty: false };
+          }
+        } catch (docError) {
+          console.log('Error finding by doc ID:', docError.message);
+        }
+      }
       
       if (userSnapshot.empty) {
         return res.status(400).json({
           error: "User not found",
+          userId: userId,
         });
       }
 
       const userDoc = userSnapshot.docs[0];
+      console.log('Found user:', userDoc.data());
+      
+      // Parse packageLimit (handle both string and number)
+      const packageLimit = packageData.packageLimit ? parseInt(packageData.packageLimit) : null;
       
       // Update user with subscription details, expiry date, and remaining posts/prompts
       await userDoc.ref.update({
@@ -167,8 +215,8 @@ router.post("/confirm-payment", async (req, res) => {
         packageId: packageId,
         subscriptionDate: new Date().toISOString(),
         expiryDate: expiryDate.toISOString(),
-        remainingPosts: packageData.packageLimit || null,
-        remainingPrompts: packageData.packageLimit || null,
+        remainingPosts: packageLimit,
+        remainingPrompts: packageLimit,
         updatedAt: new Date().toISOString(),
       });
 
@@ -211,7 +259,8 @@ router.post("/test-complete-payment", async (req, res) => {
     
     // Confirm the payment intent with test card
     const paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
-      payment_method: 'pm_card_visa', // Test payment method
+      payment_method: 'pm_card_visa',
+      return_url: 'https://your-website.com/return',
     });
     
     res.status(200).json({
@@ -224,6 +273,28 @@ router.post("/test-complete-payment", async (req, res) => {
     res.status(500).json({
       error: error.message || "Failed to complete test payment",
     });
+  }
+});
+
+// Debug endpoint to list all packages
+router.get("/debug/packages", async (req, res) => {
+  try {
+    const db = getAdminDB();
+    const packagesSnapshot = await db.collection("packages").get();
+    
+    const packages = [];
+    packagesSnapshot.forEach(doc => {
+      const data = doc.data();
+      packages.push({
+        docId: doc.id,
+        packageId: data.packageId,
+        name: data.name,
+      });
+    });
+    
+    res.json({ packages });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
