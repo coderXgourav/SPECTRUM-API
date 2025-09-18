@@ -133,6 +133,7 @@ import ticketRoutes from "./routes/tickets.js";
 import packageRoutes from "./routes/packages.js";
 import reportRoutes from "./routes/reports.js";
 import taskRouter from "./routes/task.js";
+import paymentRoutes from "./routes/payments.js";
 
 // Basic route
 app.get("/", (req, res) => {
@@ -170,6 +171,7 @@ app.use("/api/tickets", ticketRoutes);
 app.use("/api/packages", packageRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/tasks", taskRouter);
+app.use("/api/payments", paymentRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
