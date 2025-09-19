@@ -19,12 +19,112 @@ router.post("/create-payment-intent", async (req, res) => {
   try {
     const { amount, currency = "usd", packageId, userId } = req.body;
 
-    if (!amount || !packageId || !userId) {
+    if (amount === undefined || amount === null || !packageId || !userId) {
       return res.status(400).json({
         error: "Amount, packageId, and userId are required",
       });
     }
 
+    // Handle free packages (price = 0)
+    if (parseFloat(amount) === 0) {
+      const db = getAdminDB();
+      
+      // Get package details
+      const packageSnapshot = await db.collection("packages")
+        .where("packageId", "==", packageId)
+        .get();
+      
+      if (packageSnapshot.empty) {
+        return res.status(400).json({
+          error: "Package not found",
+        });
+      }
+
+      const packageData = packageSnapshot.docs[0].data();
+      
+      // Calculate expiry date
+      const currentDate = new Date();
+      let expiryDate = new Date(currentDate);
+      
+      const duration = packageData.duration || "1 year";
+      if (duration.includes("year")) {
+        const years = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setFullYear(expiryDate.getFullYear() + years);
+      } else if (duration.includes("month")) {
+        const months = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setMonth(expiryDate.getMonth() + months);
+      } else if (duration.includes("day")) {
+        const days = parseInt(duration.match(/\d+/)?.[0] || "30");
+        expiryDate.setDate(expiryDate.getDate() + days);
+      } else {
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      }
+
+      // Find user document
+      const usersRef = db.collection("users");
+      let userQuery = usersRef.where("uid", "==", userId);
+      let userSnapshot = await userQuery.get();
+      
+      if (userSnapshot.empty) {
+        userQuery = usersRef.where("user_id", "==", userId);
+        userSnapshot = await userQuery.get();
+      }
+      
+      if (userSnapshot.empty) {
+        try {
+          const userDoc = await usersRef.doc(userId).get();
+          if (userDoc.exists) {
+            userSnapshot = { docs: [userDoc], empty: false };
+          }
+        } catch (docError) {
+          console.log('Error finding user:', docError.message);
+        }
+      }
+      
+      if (userSnapshot.empty) {
+        return res.status(400).json({
+          error: "User not found",
+        });
+      }
+
+      const userDoc = userSnapshot.docs[0];
+      const packageLimit = packageData.packageLimit ? parseInt(packageData.packageLimit) : null;
+      const storage = packageData.storage ? parseInt(packageData.storage) : 0;
+      const maxGroup = packageData.maxGroup ? parseInt(packageData.maxGroup) : 0;
+      
+      // Update user with free subscription
+      await userDoc.ref.update({
+        subscriptionStatus: "active",
+        packageId: packageId,
+        subscriptionDate: new Date().toISOString(),
+        expiryDate: expiryDate.toISOString(),
+        remainingPosts: packageLimit,
+        remainingPrompts: packageLimit,
+        storage: storage,
+        maxGroup: maxGroup,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Create subscription record
+      await db.collection("subscriptions").add({
+        packageId,
+        userId,
+        paymentIntentId: null,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        expiryDate: expiryDate.toISOString(),
+        amount: 0,
+        currency: currency,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Free package activated successfully",
+        isFree: true,
+      });
+    }
+
+    // Handle paid packages
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(amount * 100), // Convert to cents
       currency,
@@ -41,6 +141,7 @@ router.post("/create-payment-intent", async (req, res) => {
     res.status(200).json({
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
+      isFree: false,
     });
   } catch (error) {
     console.error("Create payment intent error:", error);
@@ -206,8 +307,10 @@ router.post("/confirm-payment", async (req, res) => {
       const userDoc = userSnapshot.docs[0];
       console.log('Found user:', userDoc.data());
       
-      // Parse packageLimit (handle both string and number)
+      // Parse package limits (handle both string and number)
       const packageLimit = packageData.packageLimit ? parseInt(packageData.packageLimit) : null;
+      const storage = packageData.storage ? parseInt(packageData.storage) : 0;
+      const maxGroup = packageData.maxGroup ? parseInt(packageData.maxGroup) : 0;
       
       // Update user with subscription details, expiry date, and remaining posts/prompts
       await userDoc.ref.update({
@@ -217,6 +320,8 @@ router.post("/confirm-payment", async (req, res) => {
         expiryDate: expiryDate.toISOString(),
         remainingPosts: packageLimit,
         remainingPrompts: packageLimit,
+        storage: storage,
+        maxGroup: maxGroup,
         updatedAt: new Date().toISOString(),
       });
 

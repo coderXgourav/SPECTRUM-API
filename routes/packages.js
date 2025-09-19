@@ -124,6 +124,10 @@ const formatPackageForFrontend = async (db, packageDoc) => {
     isActive: data.isActive,
     totalUser: subscriberCount.toLocaleString(), // Properly formatted with commas
     packageLimit: data.packageLimit || null,
+    trialDays: data.trialDays || 0,
+    trialPosts: data.trialPosts || 0,
+    storage: data.storage || 0,
+    maxGroup: data.maxGroup || 0,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -224,6 +228,10 @@ router.post("/", async (req, res) => {
       features,
       isActive = true,
       packageLimit,
+      trialDays = 0,
+      trialPosts = 0,
+      storage = 0,
+      maxGroup = 0,
     } = req.body;
 
     console.log('Create package request body:', req.body);
@@ -249,6 +257,10 @@ router.post("/", async (req, res) => {
       features: features || [],
       isActive,
       packageLimit: packageLimit && packageLimit !== '' ? parseInt(packageLimit) : null,
+      trialDays: trialDays && trialDays !== '' ? parseInt(trialDays) : 0,
+      trialPosts: trialPosts && trialPosts !== '' ? parseInt(trialPosts) : 0,
+      storage: storage && storage !== '' ? parseInt(storage) : 0,
+      maxGroup: maxGroup && maxGroup !== '' ? parseInt(maxGroup) : 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -317,6 +329,26 @@ router.put("/:id", async (req, res) => {
     // Convert packageLimit to number if provided
     if (updates.packageLimit !== undefined) {
       updates.packageLimit = updates.packageLimit && updates.packageLimit !== '' ? parseInt(updates.packageLimit) : null;
+    }
+
+    // Convert trialDays to number if provided
+    if (updates.trialDays !== undefined) {
+      updates.trialDays = updates.trialDays && updates.trialDays !== '' ? parseInt(updates.trialDays) : 0;
+    }
+
+    // Convert trialPosts to number if provided
+    if (updates.trialPosts !== undefined) {
+      updates.trialPosts = updates.trialPosts && updates.trialPosts !== '' ? parseInt(updates.trialPosts) : 0;
+    }
+
+    // Convert storage to number if provided
+    if (updates.storage !== undefined) {
+      updates.storage = updates.storage && updates.storage !== '' ? parseInt(updates.storage) : 0;
+    }
+
+    // Convert maxGroup to number if provided
+    if (updates.maxGroup !== undefined) {
+      updates.maxGroup = updates.maxGroup && updates.maxGroup !== '' ? parseInt(updates.maxGroup) : 0;
     }
 
 
