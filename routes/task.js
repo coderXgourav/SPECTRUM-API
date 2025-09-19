@@ -7,6 +7,129 @@ import axios from 'axios';
 
 const taskRouter = Router();
 
+// Generate post with subscription validation
+taskRouter.post('/generate-post/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { title, description, category, tags } = req.body;
+    const db = getFirestore();
+
+    // 1. Check user subscription and limits
+    const userQuery = db.collection('users').where('user_id', '==', userId);
+    const userSnapshot = await userQuery.get();
+    
+    if (userSnapshot.empty) {
+      return res.status(404).json({
+        error: 'User not found',
+        success: false
+      });
+    }
+    
+    const userData = userSnapshot.docs[0].data();
+    const now = new Date();
+    
+    // Check if user has active subscription
+    if (userData.subscriptionStatus !== 'active') {
+      return res.status(403).json({
+        error: 'Active subscription required',
+        success: false
+      });
+    }
+    
+    // Check subscription expiry
+    if (userData.expiryDate && new Date(userData.expiryDate) < now) {
+      return res.status(403).json({
+        error: 'Subscription has expired',
+        success: false
+      });
+    }
+    
+    // Check if user is in trial period
+    const isTrialPeriod = userData.subscriptionDate && 
+      userData.packageId && 
+      (!userData.expiryDate || new Date(userData.subscriptionDate) > new Date(userData.expiryDate));
+    
+    if (isTrialPeriod) {
+      // Check trial posts limit
+      const trialPostsUsed = userData.trialPostsUsed || 0;
+      const packageQuery = db.collection('packages').where('packageId', '==', userData.packageId);
+      const packageSnapshot = await packageQuery.get();
+      
+      if (!packageSnapshot.empty) {
+        const packageData = packageSnapshot.docs[0].data();
+        const trialPosts = parseInt(packageData.trialPosts) || 0;
+        
+        if (trialPostsUsed >= trialPosts) {
+          return res.status(403).json({
+            error: 'Trial posts limit exceeded',
+            success: false
+          });
+        }
+      }
+    } else {
+      // Check remaining posts for paid subscription
+      if (!userData.remainingPosts || userData.remainingPosts <= 0) {
+        return res.status(403).json({
+          error: 'No remaining posts available',
+          success: false
+        });
+      }
+    }
+
+    // 2. Create post
+    const postData = {
+      title: title || 'Untitled Post',
+      description: description || '',
+      category: category || 'general',
+      tags: tags || [],
+      created_at: Timestamp.now(),
+      updated_at: Timestamp.now(),
+      taskGenerated: false
+    };
+
+    const postRef = await db
+      .collection('users')
+      .doc(userId)
+      .collection('posts')
+      .add(postData);
+
+    // 3. Update user limits
+    const userDocRef = userSnapshot.docs[0].ref;
+    if (isTrialPeriod) {
+      // Increment trial posts used
+      await userDocRef.update({
+        trialPostsUsed: (userData.trialPostsUsed || 0) + 1,
+        updatedAt: new Date().toISOString()
+      });
+    } else {
+      // Decrement remaining posts
+      await userDocRef.update({
+        remainingPosts: userData.remainingPosts - 1,
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      postId: postRef.id,
+      message: 'Post created successfully',
+      post: {
+        id: postRef.id,
+        ...postData,
+        created_at: postData.created_at.toDate().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating post:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate post',
+      details: error.message
+    });
+  }
+});
+
 // Generate tasks and markdown (your existing endpoint - improved)
 taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
   try {
