@@ -125,6 +125,7 @@ const formatPackageForFrontend = async (db, packageDoc) => {
     totalUser: subscriberCount.toLocaleString(), // Properly formatted with commas
     packageLimit: data.packageLimit || null,
     trialDays: data.trialDays || 0,
+    trialPosts: data.trialPosts || 0,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   };
@@ -226,11 +227,13 @@ router.post("/", async (req, res) => {
       isActive = true,
       packageLimit,
       trialDays = 0,
+      trialPosts = 0,
     } = req.body;
 
     console.log('Create package request body:', req.body);
     console.log('packageLimit:', packageLimit, 'type:', typeof packageLimit);
     console.log('trialDays:', trialDays, 'type:', typeof trialDays);
+    console.log('trialPosts:', trialPosts, 'type:', typeof trialPosts);
     
     if (!name || !description || !price) {
       return res.status(400).json({
@@ -253,6 +256,7 @@ router.post("/", async (req, res) => {
       isActive,
       packageLimit: packageLimit && packageLimit !== '' ? parseInt(packageLimit) : null,
       trialDays: trialDays && trialDays !== '' ? parseInt(trialDays) : 0,
+      trialPosts: trialPosts && trialPosts !== '' ? parseInt(trialPosts) : 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -326,6 +330,11 @@ router.put("/:id", async (req, res) => {
     // Convert trialDays to number if provided
     if (updates.trialDays !== undefined) {
       updates.trialDays = updates.trialDays && updates.trialDays !== '' ? parseInt(updates.trialDays) : 0;
+    }
+
+    // Convert trialPosts to number if provided
+    if (updates.trialPosts !== undefined) {
+      updates.trialPosts = updates.trialPosts && updates.trialPosts !== '' ? parseInt(updates.trialPosts) : 0;
     }
 
     const updateData = {

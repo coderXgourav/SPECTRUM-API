@@ -40,6 +40,96 @@ taskRouter.get('/generate-tasks/:userId/:postId', async (req, res) => {
       });
     }
 
+    // 2. Check user subscription and limits
+    const userQuery = db.collection('users').where('user_id', '==', userId);
+    const userSnapshot = await userQuery.get();
+    
+    if (userSnapshot.empty) {
+      return res.status(404).json({
+        error: 'User not found',
+        success: false
+      });
+    }
+    
+    const userData = userSnapshot.docs[0].data();
+    const now = new Date();
+    
+    console.log('User data:', JSON.stringify(userData, null, 2));
+    console.log('Current time:', now.toISOString());
+    
+    // Check if user has active subscription
+    if (userData.subscriptionStatus !== 'active') {
+      console.log('Subscription status check failed:', userData.subscriptionStatus);
+      return res.status(403).json({
+        error: 'Active subscription required',
+        success: false
+      });
+    }
+    
+    console.log('Subscription status: active ✓');
+    
+    // Check subscription expiry
+    if (userData.expiryDate && new Date(userData.expiryDate) < now) {
+      console.log('Subscription expired:', userData.expiryDate);
+      return res.status(403).json({
+        error: 'Subscription has expired',
+        success: false
+      });
+    }
+    
+    console.log('Expiry check passed ✓');
+    
+    // Check if user is in trial period
+    const isTrialPeriod = userData.subscriptionDate && 
+      userData.packageId && 
+      (!userData.expiryDate || new Date(userData.subscriptionDate) > new Date(userData.expiryDate));
+    
+    console.log('Is trial period:', isTrialPeriod);
+    console.log('Subscription date:', userData.subscriptionDate);
+    console.log('Package ID:', userData.packageId);
+    console.log('Expiry date:', userData.expiryDate);
+    
+    if (isTrialPeriod) {
+      console.log('User is in trial period');
+      // Check trial posts limit
+      const trialPostsUsed = userData.trialPostsUsed || 0;
+      console.log('Trial posts used:', trialPostsUsed);
+      
+      const packageQuery = db.collection('packages').where('packageId', '==', userData.packageId);
+      const packageSnapshot = await packageQuery.get();
+      
+      if (!packageSnapshot.empty) {
+        const packageData = packageSnapshot.docs[0].data();
+        const trialPosts = parseInt(packageData.trialPosts) || 0;
+        console.log('Trial posts allowed:', trialPosts);
+        
+        if (trialPostsUsed >= trialPosts) {
+          console.log('Trial posts limit exceeded');
+          return res.status(403).json({
+            error: 'Trial posts limit exceeded',
+            success: false
+          });
+        }
+        console.log('Trial posts check passed ✓');
+      } else {
+        console.log('Package not found for trial user');
+      }
+    } else {
+      console.log('User has paid subscription');
+      // Check remaining prompts for paid subscription
+      console.log('Remaining prompts:', userData.remainingPrompts);
+      if (!userData.remainingPrompts || userData.remainingPrompts <= 0) {
+        console.log('No remaining prompts');
+        return res.status(403).json({
+          error: 'No remaining prompts available',
+          success: false
+        });
+      }
+      console.log('Remaining prompts check passed ✓');
+    }
+    
+    console.log('All validation checks passed, proceeding with task generation...');
+
     // -----------------------------
     // 2. Generate Markdown Roadmap
     // -----------------------------
@@ -224,6 +314,23 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
         });
         await batch.commit();
       }
+      
+      // 6. Update user limits
+      const userDocRef = userSnapshot.docs[0].ref;
+      if (isTrialPeriod) {
+        // Increment trial posts used
+        await userDocRef.update({
+          trialPostsUsed: (userData.trialPostsUsed || 0) + 1,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        // Decrement remaining prompts
+        await userDocRef.update({
+          remainingPrompts: userData.remainingPrompts - 1,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      
     } catch (firestoreError) {
       console.error('❌ Error saving to Firestore:', firestoreError.message);
       return res.status(500).json({
