@@ -102,7 +102,7 @@ taskRouter.post('/generate-group/:userId', async (req, res) => {
     const maxGroup = userData.maxGroup || 0;
     if (maxGroup <= 0) {
       return res.status(403).json({
-        error: 'No group creation limit available',
+        error: 'Group creation not allowed. You’ve already reached the limit.',
         success: false
       });
     }
