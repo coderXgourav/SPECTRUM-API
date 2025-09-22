@@ -62,7 +62,7 @@ router.post("/create-payment-intent", async (req, res) => {
 
       // Find user document
       const usersRef = db.collection("users");
-      let userQuery = usersRef.where("uid", "==", userId);
+      let userQuery = usersRef.where("user_id", "==", userId);
       let userSnapshot = await userQuery.get();
       
       if (userSnapshot.empty) {
@@ -274,12 +274,12 @@ router.post("/confirm-payment", async (req, res) => {
       const usersRef = db.collection("users");
       console.log('Looking for userId:', userId);
       
-      let userQuery = usersRef.where("uid", "==", userId);
+      let userQuery = usersRef.where("user_id", "==", userId);
       let userSnapshot = await userQuery.get();
       
       // If not found by uid, try user_id field
       if (userSnapshot.empty) {
-        console.log('User not found by uid, trying user_id field');
+        console.log('User not found by user_id, trying document ID');
         userQuery = usersRef.where("user_id", "==", userId);
         userSnapshot = await userQuery.get();
       }

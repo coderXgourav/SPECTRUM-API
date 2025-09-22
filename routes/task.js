@@ -76,48 +76,21 @@ taskRouter.post('/generate-post/:userId', async (req, res) => {
       }
     }
 
-    // 2. Create post
-    const postData = {
-      title: title || 'Untitled Post',
-      description: description || '',
-      category: category || 'general',
-      tags: tags || [],
-      created_at: Timestamp.now(),
-      updated_at: Timestamp.now(),
-      taskGenerated: false
-    };
-
-    const postRef = await db
-      .collection('users')
-      .doc(userId)
-      .collection('posts')
-      .add(postData);
-
-    // 3. Update user limits
+    // 2. Update user limits (decrement remainingPosts)
     const userDocRef = userSnapshot.docs[0].ref;
-    if (isTrialPeriod) {
-      // Increment trial posts used
-      await userDocRef.update({
-        trialPostsUsed: (userData.trialPostsUsed || 0) + 1,
-        updatedAt: new Date().toISOString()
-      });
-    } else {
-      // Decrement remaining posts
+    if (!isTrialPeriod) {
+      // Decrement remaining posts for paid subscription
       await userDocRef.update({
         remainingPosts: userData.remainingPosts - 1,
         updatedAt: new Date().toISOString()
       });
     }
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      postId: postRef.id,
-      message: 'Post created successfully',
-      post: {
-        id: postRef.id,
-        ...postData,
-        created_at: postData.created_at.toDate().toISOString()
-      }
+      message: 'Validation passed - ready to create post',
+      canCreatePost: true,
+      remainingPosts: isTrialPeriod ? 'unlimited' : userData.remainingPosts - 1
     });
 
   } catch (error) {
