@@ -42,33 +42,10 @@ router.post("/create-payment-intent", async (req, res) => {
 
       const packageData = packageSnapshot.docs[0].data();
       
-      // Calculate expiry date
-      const currentDate = new Date();
-      let expiryDate = new Date(currentDate);
-      
-      const duration = packageData.duration || "1 year";
-      if (duration.includes("year")) {
-        const years = parseInt(duration.match(/\d+/)?.[0] || "1");
-        expiryDate.setFullYear(expiryDate.getFullYear() + years);
-      } else if (duration.includes("month")) {
-        const months = parseInt(duration.match(/\d+/)?.[0] || "1");
-        expiryDate.setMonth(expiryDate.getMonth() + months);
-      } else if (duration.includes("day")) {
-        const days = parseInt(duration.match(/\d+/)?.[0] || "30");
-        expiryDate.setDate(expiryDate.getDate() + days);
-      } else {
-        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
-      }
-
-      // Find user document
+      // Find user document first
       const usersRef = db.collection("users");
       let userQuery = usersRef.where("user_id", "==", userId);
       let userSnapshot = await userQuery.get();
-      
-      if (userSnapshot.empty) {
-        userQuery = usersRef.where("user_id", "==", userId);
-        userSnapshot = await userQuery.get();
-      }
       
       if (userSnapshot.empty) {
         try {
@@ -88,11 +65,38 @@ router.post("/create-payment-intent", async (req, res) => {
       }
 
       const userDoc = userSnapshot.docs[0];
+      const userData = userDoc.data();
+      
+      // Check if user already used trial package
+      if (userData.trialPackage === true) {
+        return res.status(400).json({
+          error: "You have already used your trial package",
+        });
+      }
+      
+      // Calculate expiry date
+      const currentDate = new Date();
+      let expiryDate = new Date(currentDate);
+      
+      const duration = packageData.duration || "1 year";
+      if (duration.includes("year")) {
+        const years = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setFullYear(expiryDate.getFullYear() + years);
+      } else if (duration.includes("month")) {
+        const months = parseInt(duration.match(/\d+/)?.[0] || "1");
+        expiryDate.setMonth(expiryDate.getMonth() + months);
+      } else if (duration.includes("day")) {
+        const days = parseInt(duration.match(/\d+/)?.[0] || "30");
+        expiryDate.setDate(expiryDate.getDate() + days);
+      } else {
+        expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+      }
+
       const packageLimit = packageData.packageLimit ? parseInt(packageData.packageLimit) : null;
       const storage = packageData.storage ? parseInt(packageData.storage) : 0;
       const maxGroup = packageData.maxGroup ? parseInt(packageData.maxGroup) : 0;
       
-      // Update user with free subscription
+      // Update user with free subscription and mark trial as used
       await userDoc.ref.update({
         subscriptionStatus: "active",
         packageId: packageId,
@@ -102,6 +106,7 @@ router.post("/create-payment-intent", async (req, res) => {
         remainingPrompts: packageLimit,
         storage: storage,
         maxGroup: maxGroup,
+        trialPackage: true,
         updatedAt: new Date().toISOString(),
       });
 
@@ -119,7 +124,7 @@ router.post("/create-payment-intent", async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        message: "Free package activated successfully",
+        message: "Trial package activated successfully",
         isFree: true,
       });
     }
