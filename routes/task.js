@@ -7,6 +7,130 @@ import axios from 'axios';
 
 const taskRouter = Router();
 
+// Get storage with subscription validation
+taskRouter.get('/get-storage/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const db = getFirestore();
+
+    // 1. Check user subscription
+    const userQuery = db.collection('users').where('user_id', '==', userId);
+    const userSnapshot = await userQuery.get();
+    
+    if (userSnapshot.empty) {
+      return res.status(404).json({
+        error: 'User not found',
+        success: false
+      });
+    }
+    
+    const userData = userSnapshot.docs[0].data();
+    const now = new Date();
+    
+    // Check if user has active subscription
+    if (userData.subscriptionStatus !== 'active') {
+      return res.status(403).json({
+        error: 'Active subscription required',
+        success: false
+      });
+    }
+    
+    // Check subscription expiry
+    if (userData.expiryDate && new Date(userData.expiryDate) < now) {
+      return res.status(403).json({
+        error: 'Subscription has expired',
+        success: false
+      });
+    }
+
+    // Return storage information
+    return res.status(200).json({
+      success: true,
+      message: 'Storage access granted',
+      storage: userData.storage || '0GB',
+      // maxStorage: userData.maxStorage || '1GB',
+      // storageUsed: userData.storageUsed || '0GB'
+    });
+
+  } catch (error) {
+    console.error('❌ Error getting storage:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to get storage',
+      details: error.message
+    });
+  }
+});
+
+// Generate group with subscription validation
+taskRouter.post('/generate-group/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const db = getFirestore();
+
+    // 1. Check user subscription and limits
+    const userQuery = db.collection('users').where('user_id', '==', userId);
+    const userSnapshot = await userQuery.get();
+    
+    if (userSnapshot.empty) {
+      return res.status(404).json({
+        error: 'User not found',
+        success: false
+      });
+    }
+    
+    const userData = userSnapshot.docs[0].data();
+    const now = new Date();
+    
+    // Check if user has active subscription
+    if (userData.subscriptionStatus !== 'active') {
+      return res.status(403).json({
+        error: 'Active subscription required',
+        success: false
+      });
+    }
+    
+    // Check subscription expiry
+    if (userData.expiryDate && new Date(userData.expiryDate) < now) {
+      return res.status(403).json({
+        error: 'Subscription has expired',
+        success: false
+      });
+    }
+    
+    // Check maxGroup limit
+    const maxGroup = userData.maxGroup || 0;
+    if (maxGroup <= 0) {
+      return res.status(403).json({
+        error: 'No group creation limit available',
+        success: false
+      });
+    }
+
+    // 2. Decrement maxGroup count
+    const userDocRef = userSnapshot.docs[0].ref;
+    await userDocRef.update({
+      maxGroup: maxGroup - 1,
+      updatedAt: new Date().toISOString()
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Validation passed - ready to create group',
+      canCreateGroup: true,
+      remainingGroups: maxGroup - 1
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating group:', error.message);
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to generate group',
+      details: error.message
+    });
+  }
+});
+
 // Generate post with subscription validation
 taskRouter.post('/generate-post/:userId', async (req, res) => {
   try {
@@ -260,7 +384,7 @@ ${JSON.stringify(postData, null, 2)}
       const markdownResponse = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'openrouter/sonoma-dusk-alpha',
+          model: 'x-ai/grok-4-fast:free',
           messages: [{ role: 'user', content: markdownPrompt }],
           temperature: 0.7,
         },
@@ -317,7 +441,7 @@ Idea Data: ${JSON.stringify(postData, null, 2)}
       const tasksResponse = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
-          model: 'openrouter/sonoma-dusk-alpha',
+          model: 'x-ai/grok-4-fast:free',
           messages: [{ role: 'user', content: taskPrompt }],
           temperature: 0.7,
         },
